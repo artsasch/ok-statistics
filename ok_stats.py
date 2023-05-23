@@ -1,24 +1,30 @@
 import requests
 import json
-from datetime import datetime
-from utils.utils import *
+import datetime
+import pandas as pd
+from utils_ok.utils import *
 
 
-# method = "url.getInfo"
-# url = "https://ok.ru/ostrov.chistoty"
-# sig = md5(method, url)
-# 
-# params = {
-#     "application_key": application_key,
-#     "format": request_format,
-#     "method": method,
-#     "url": url,
-#     "sig": sig,
-#     "access_token": access_token,
-# }
+method = "url.getInfo"
+url = "https://ok.ru/groupsavushkin"
+getInfo_sig = md5_get_info(method, url)
+
+params = {
+    "application_key": application_key,
+    "format": request_format,
+    "method": method,
+    "url": url,
+    "sig": getInfo_sig,
+    "access_token": access_token,
+}
+
+response = requests.get(api_url, params=params)
+data = json.loads(response.text)
+gid = data['objectId']
+print(f"gid: {gid}")
 
 
-fields = "comments, \
+fields = "comments,\
           complaints, \
           content_opens, \
           engagement, \
@@ -44,31 +50,51 @@ fields = "comments, \
           renderings, \
           reshares, \
           topic_opens, \
-          video_plays, votes"
+          video_plays, \
+          votes"
 
-method = "group.getStatTrends"
-sig = "9baf058da1814d299ca4622f332f05c2"
-gid = 52927256723523
 
-params = {
+start_time = "2023-04-01"
+unix_start_time_ms = date_to_unix(start_time) * 1000
+
+end_time = str(datetime.date.today())
+unix_end_time_ms = date_to_unix(end_time) * 1000
+print(f"start_time: {start_time}, end_time: {end_time}")
+print(f"unix_start_time_ms: {unix_start_time_ms}, unix_end_time_ms: {unix_end_time_ms}")
+
+getStatTrends_method = "group.getStatTrends"
+sig = md5_get_stat_trends(getStatTrends_method, unix_start_time_ms, unix_end_time_ms, fields, gid)  # get sig
+
+group_params = {
     "application_key": application_key,
     "format": request_format,
-    "method": method,
+    "method": getStatTrends_method,
     "gid": gid,
     "sig": sig,
     "access_token": access_token,
     "fields": fields,
-    "start_time": 1672806400000,
-    "end_time": 1672972800000
+    "start_time": unix_start_time_ms,
+    "end_time": unix_end_time_ms
 }
 
 
-response = requests.get(api_url, params=params)
+response = requests.get(api_url, params=group_params)
 data = json.loads(response.text)
 
 for metric, values in data.items():
     for value in values:
-        value["time"] = datetime.fromtimestamp(value["time"] / 1000.0).strftime("%Y-%m-%d")
+        value["time"] = unix_to_date(value["time"] / 1000)
 
-with open('.json/response.json', 'w') as f:
+with open('utils_ok/response.json', 'w') as f:
     json.dump(data, f, indent=3)
+
+
+df = pd.DataFrame()
+for metric, values in data.items():
+    metric_df = pd.DataFrame(values)
+    metric_df.set_index('time', inplace=True)
+    metric_df.rename(columns={'value': metric}, inplace=True)
+    df = pd.concat([df, metric_df], axis=1)
+df.reset_index(inplace=True)
+print(df)
+df.to_csv('utils_ok/response.csv', index=False)
